@@ -59,6 +59,12 @@ select:focus,textarea:focus,input:focus{outline:2px solid var(--accent);outline-
 .foot a{color:var(--ink);font-weight:700}
 .find{display:flex;gap:8px;margin-top:14px} .find input{text-transform:uppercase} .find .btn{margin:0;width:auto;padding:0 18px}
 .hide{display:none!important}
+.back{display:inline-block;color:var(--accent);font-weight:700;font-size:14px;text-decoration:none;margin:-6px 0 10px}
+.grp{margin:18px 0 8px;font:700 12.5px var(--f-display);color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+.ins{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-bottom:8px;color:var(--ink);text-decoration:none}
+.ins b{display:block;font-size:15px} .ins small{color:var(--muted);font-size:12.5px}
+.chip{flex:none;font:700 12px var(--f-display);border-radius:999px;padding:5px 10px;white-space:nowrap}
+.chip.ok{color:var(--ok);background:rgba(111,208,143,.12)} .chip.no{color:var(--warn);background:rgba(242,193,78,.12)} .chip.me{color:var(--info);background:rgba(127,182,242,.12)}
 </style>
 </head>
 <body>
@@ -97,9 +103,24 @@ select:focus,textarea:focus,input:focus{outline:2px solid var(--accent);outline-
     document.getElementById('find').addEventListener('submit', e => { e.preventDefault(); const v = document.getElementById('q').value.trim(); if (v) location.hash = v.toUpperCase(); });
   }
 
+  function renderInsumos(){
+    const ks = Object.keys(DATA.items).filter(k => DATA.items[k].g);
+    const groups = [...new Set(ks.map(k => DATA.items[k].g))];
+    app.innerHTML = `${top()}<h1 class="box" style="font-size:34px">Insumos</h1>
+      <p class="where">Sprays, fitas, fluidos e enforca-gatos da oficina. Toque no item pra ver o pedido ou solicitar.</p>` +
+      groups.map(g => `<p class="grp">${esc(g)}</p>` + ks.filter(k => DATA.items[k].g === g).map(k => {
+        const it = DATA.items[k], asked = +store.get('cx.pedido.' + k) || 0, recent = asked && (Date.now() - asked) < 3 * 24 * 3600e3;
+        const chip = it.pend.length ? '<span class="chip ok">Pedido aberto</span>' : recent ? '<span class="chip me">Você já pediu</span>' : '<span class="chip no">Sem pedido</span>';
+        return `<a class="ins" href="#${esc(k)}"><span><b>${esc(it.d)}</b><small>Cód. ${esc(it.c || '—')}</small></span>${chip}</a>`;
+      }).join('')).join('') +
+      `<div class="foot"><span>Pedidos atualizados em ${esc(DATA.at)}</span><a href="${PAINEL}" target="_blank" rel="noopener">Abrir o painel 3D</a></div>`;
+    document.title = 'Insumos · Insumos da oficina';
+  }
+
   function render(){
     const k = boxFromUrl();
     if (!DATA) return;
+    if (k === 'INSUMOS') return renderInsumos();
     if (!k) return finder('Digite o número da caixa que está na etiqueta.');
     const it = DATA.items[k];
     if (!it) return finder(`Caixa ${k} não encontrada. Confira o número da etiqueta.`);
@@ -138,9 +159,10 @@ select:focus,textarea:focus,input:focus{outline:2px solid var(--accent);outline-
     if (it.mn && it.mn !== 'N/A') rows.push(`<div class="row"><b>Quantidade mínima</b><span>${esc(it.mn)}</span></div>`);
 
     app.innerHTML = `${top()}
-      <h1 class="box">${esc(k)}</h1>
+      ${it.g ? '<a class="back" href="#insumos">← Todos os insumos</a>' : ''}
+      <h1 class="box"${it.g ? ' style="font-size:30px"' : ''}>${esc(it.g ? it.d : k)}</h1>
       <p class="where">${esc(it.w)}</p>
-      <p class="item">${esc(it.vz ? 'Caixa vazia' : it.d)}</p>
+      ${it.g ? '' : `<p class="item">${esc(it.vz ? 'Caixa vazia' : it.d)}</p>`}
       ${st}
       ${rows.length ? `<div class="card">${rows.join('')}</div>` : ''}
       <div class="foot"><span>Pedidos atualizados em ${esc(DATA.at)}</span><a href="${PAINEL}" target="_blank" rel="noopener">Abrir o painel 3D</a></div>`;
@@ -180,10 +202,12 @@ select:focus,textarea:focus,input:focus{outline:2px solid var(--accent);outline-
   const FACE = { A: 'Face A', B: 'Face B', C: 'Centro (caixas C)' };
   // data.json compacto: caixa -> [descrição, código, PN, local, mínimo, fileira, posição, vazia, pedidos abertos, último entregue]
   const unpack = d => { const items = {}; for (const [k, a] of Object.entries(d.items)) items[k] = {
-      d: a[0], c: a[1], pn: a[2], lm: a[3], mn: a[4], w: a[5] ? `${FACE[k[0]]} · fileira ${a[5]}, posição ${a[6]}` : FACE[k[0]], vz: !!a[7],
+      d: a[0], c: a[1], pn: a[2], lm: a[3], mn: a[4], g: a[10] || '', w: a[11] || (a[5] ? `${FACE[k[0]]} · fileira ${a[5]}, posição ${a[6]}` : FACE[k[0]]), vz: !!a[7],
       pend: (a[8] || []).map(p => ({ sa: p[0], dt: p[1], q: p[2], cat: p[3], st: p[4] })), ult: a[9] ? { sa: a[9][0], dt: a[9][1] } : null };
     return { at: d.at, items }; };
-  fetch('data.json', { cache: 'no-cache' }).then(r => r.json()).then(d => { DATA = unpack(d); render(); })
+  const getJSON = f => fetch(f, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error(f); return r.json(); });
+  Promise.all([getJSON('data.json'), getJSON('insumos.json').catch(() => ({ items: {} }))])
+    .then(([d, ins]) => { DATA = unpack({ at: d.at, items: Object.assign({}, d.items, ins.items) }); render(); })
     .catch(() => { app.innerHTML = `${top()}<p class="err">Não consegui carregar a lista de caixas. Tente de novo.</p>`; });
 })();
 </script>
